@@ -1,0 +1,66 @@
+#!/bin/bash
+#
+# Author: Panda
+# Update: 20161031
+#
+# Store commands & Send syslogs to log-server.
+
+#DIR=$(cd `dirname $0`;echo $PWD)
+
+LOG_DIR=/ROOT/log/syslog && mkdir -p $LOG_DIR
+
+## COMMAND STORE
+if ! grep -q '^export PROMPT_COMMAND' /etc/bashrc;then
+	cat >> /etc/bashrc << EOF
+remoteip=\$(who am i | awk '{print \$5}' | sed "s/[()]//g" )
+export PROMPT_COMMAND='RETRN_VAL=\$?;logger -p local3.debug "command@\$remoteip  [\$\$]: \$(history 1 | sed "s/^[ ]*[0-9]\+[ ]*//" ) [\$RETRN_VAL]"'
+EOF
+fi
+
+rsyslog() {
+	SYSLOG_CONF=/etc/rsyslog.conf
+	## Remote Config
+	if ! grep -q '@syslog.noc.aiuv.cc:514' $SYSLOG_CONF;then
+		echo "*.*,mail.none,cron.none @syslog.noc.aiuv.cc:514" >> $SYSLOG_CONF
+	fi
+
+	## Command Config
+	cat > /etc/rsyslog.d/command.conf << EOF
+# screen monitor
+\$template com,"$LOG_DIR/%FROMHOST-IP%/%\$YEAR%-%\$MONTH%-%\$DAY%/COMMANDS/%PROGRAMNAME%"
+if \$msg contains 'command@' then ?com
+EOF
+
+	## RESTART SERVICE
+	/sbin/service rsyslog restart
+}
+
+syslog() {
+	SYSLOG_CONF=/etc/syslog.conf
+	## Command Config
+	if ! grep -q 'command@' $SYSLOG_CONF;then
+	cat >> $SYSLOG_CONF  << EOF
+# screen monitor
+\$template com,"$LOG_DIR/%FROMHOST-IP%/%\$YEAR%-%\$MONTH%-%\$DAY%/COMMANDS/%PROGRAMNAME%"
+if \$msg contains 'command@' then ?com
+EOF
+	fi
+
+	## Remote Config
+	if ! grep -q '@syslog.noc.aiuv.cc' $SYSLOG_CONF;then
+		echo "*.*,mail.none,cron.none @syslog.noc.aiuv.cc" >> $SYSLOG_CONF
+	fi
+
+	## RESTART SERVICE
+	/sbin/service syslog restart
+}
+
+## rsyslog || sysklog
+if pgrep rsyslogd > /dev/null;then
+	rsyslog
+elif pgrep syslogd > /dev/null;then
+	syslog
+else
+	echo "No rsyslogd || syslogd running."
+	return 2
+fi

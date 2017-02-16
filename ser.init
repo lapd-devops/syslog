@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# Author: Panda
+# Update: 20161031
+#
+# 1. Store commands.
+# 2. Store clients' syslog & commands.
+
+#DIR=$(cd `dirname $0`;echo $PWD)
+
+LOG_DIR=/ROOT/log/syslog && mkdir -p $LOG_DIR
+
+## Turn on UDP:514
+SYSLOG_CONF=/etc/rsyslog.conf
+if ! grep -q '^\$ModLoad imudp' $SYSLOG_CONF;then
+	echo "\$ModLoad imudp" >> $SYSLOG_CONF
+fi
+
+if ! grep -q '^\$UDPServerRun 514' $SYSLOG_CONF;then
+	echo "\$UDPServerRun 514" >> $SYSLOG_CONF
+fi
+
+## COMMAND STORE
+if ! grep -q '^export PROMPT_COMMAND' /etc/bashrc;then
+	cat >> /etc/bashrc << EOF
+remoteip=\$(who am i | awk '{print \$5}' | sed "s/[()]//g" )
+export PROMPT_COMMAND='RETRN_VAL=\$?;logger -p local3.debug "command@\$remoteip  [\$\$]: \$(history 1 | sed "s/^[ ]*[0-9]\+[ ]*//" ) [\$RETRN_VAL]"'
+EOF
+fi
+
+cat > /etc/rsyslog.d/command.conf << EOF
+# screen monitor
+\$template com,"$LOG_DIR/%FROMHOST-IP%/%\$YEAR%-%\$MONTH%-%\$DAY%/COMMANDS/%PROGRAMNAME%"
+if \$msg contains 'command@' then ?com
+& ~
+EOF
+
+## CLIENT STORE
+cat > /etc/rsyslog.d/remote.conf << EOF
+#http://www.rsyslog.com/doc/rsyslog_conf.html
+#http://www.rsyslog.com/doc/rsconf1_allowedsender.html
+\$AllowedSender UDP, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+\$template sys,"$LOG_DIR/%FROMHOST-IP%/%\$YEAR%-%\$MONTH%-%\$DAY%/%PROGRAMNAME%.log"
+*.* ?sys
+EOF
+
+## RESTART SERVICE
+/sbin/service rsyslog restart
